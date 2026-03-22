@@ -306,6 +306,7 @@ class PatchManagerApp(tk.Tk):
         self.version_store = load_version_store()
         self.cancel_flag = [False]
         self._download_thread = None
+        self.is_downloading = False
         self._ui_queue = queue.Queue()          # thread → main thread messages
         # Persisted variant choices: patch_id -> variant index (0-based)
         self.variant_choices = {}  # loaded in _restore_saved_path
@@ -490,8 +491,9 @@ class PatchManagerApp(tk.Tk):
 
         tk.Frame(sidebar, bg="#30363d", height=1).pack(fill="x", padx=8, pady=8)
 
-        ttk.Button(sidebar, text="Update All Outdated",
-                   command=self._update_all).pack(fill="x", padx=12, pady=(0, 4))
+        self.btn_update_all = ttk.Button(sidebar, text="Update All Outdated",
+                                         command=self._update_all)
+        self.btn_update_all.pack(fill="x", padx=12, pady=(0, 4))
 
         # Bottom status bar
         bottom = tk.Frame(self, bg="#161b22", height=40)
@@ -587,13 +589,17 @@ class PatchManagerApp(tk.Tk):
                 self._variant_radios.append(rb)
 
         local = self.version_store.get(patch_id, {}).get("version", "—")
-        if local == patch["version"]:
+        if getattr(self, 'is_downloading', False):
             self.btn_download.config(state="disabled")
+            self.btn_skip.config(state="disabled")
+            self.btn_remove.config(state="disabled")
         else:
-            self.btn_download.config(state="normal")
-
-        self.btn_skip.config(state="normal")
-        self.btn_remove.config(state="normal")
+            if local == patch["version"]:
+                self.btn_download.config(state="disabled")
+            else:
+                self.btn_download.config(state="normal")
+            self.btn_skip.config(state="normal")
+            self.btn_remove.config(state="normal")
 
     def _on_variant_change(self, patch_id):
         """Save the chosen variant index when the user clicks a radio button."""
@@ -776,9 +782,17 @@ class PatchManagerApp(tk.Tk):
             messagebox.showerror("Error", f"Path not found:\n{path}")
             return
 
+        if getattr(self, 'is_downloading', False):
+            return
+
         self.cancel_flag[0] = False
+        self.is_downloading = True
         self.btn_cancel.config(state="normal")
         self.btn_download.config(state="disabled")
+        if hasattr(self, 'btn_update_all'):
+            self.btn_update_all.config(state="disabled")
+        self.btn_skip.config(state="disabled")
+        self.btn_remove.config(state="disabled")
         self.progress["value"] = 0
 
         def worker():
@@ -858,6 +872,9 @@ class PatchManagerApp(tk.Tk):
         self.after(50, self._poll_queue)   # poll every 50 ms — smooth & cheap
 
     def _download_done(self):
+        self.is_downloading = False
+        if hasattr(self, 'btn_update_all'):
+            self.btn_update_all.config(state="normal")
         self.btn_cancel.config(state="disabled")
         self.progress["value"] = 100
         self._populate_tree()
